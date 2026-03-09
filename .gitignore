@@ -4,3 +4,4 @@ BenchmarkDotNet.Artifacts/
 *.user
 *.suo
 .vs/
+.claude/settings.local.json
