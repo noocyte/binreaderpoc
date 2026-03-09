@@ -70,4 +70,10 @@ public class MultiArticleQueryBenchmarks
     {
         return await _query.QueryAsync(GetArticleSubset(), "price", _afterFilter);
     }
+
+    [Benchmark(Description = "Between query + Sum")]
+    public async Task<Dictionary<Guid, double>> QueryBetweenWithSum()
+    {
+        return await _query.SumAsync(GetArticleSubset(), "price", _betweenFilter);
+    }
 }
