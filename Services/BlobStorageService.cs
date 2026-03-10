@@ -1,3 +1,4 @@
+using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Specialized;
 using DotNext;
@@ -19,7 +20,27 @@ public class BlobStorageService
 
     public async Task InitializeAsync()
     {
-        await _container.CreateIfNotExistsAsync();
+        if (await _container.ExistsAsync())
+        {
+            await _container.DeleteAsync();
+            Console.Write("Waiting for container deletion to propagate");
+            while (true)
+            {
+                try
+                {
+                    await _container.CreateAsync();
+                    Console.WriteLine(" done.");
+                    return;
+                }
+                catch (RequestFailedException ex) when (ex.ErrorCode == "ContainerBeingDeleted")
+                {
+                    Console.Write(".");
+                    await Task.Delay(2000);
+                }
+            }
+        }
+
+        await _container.CreateAsync();
     }
 
     private static string PackedBlobPath(string fieldName)

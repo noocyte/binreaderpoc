@@ -6,11 +6,11 @@ using BinReader.Models;
 using BinReader.PackedBlobFormat;
 using BinReader.Services;
 
-var connectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING");
+var connectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING")
+    ?? throw new InvalidOperationException("AZURE_STORAGE_CONNECTION_STRING environment variable is not set.");
 
 // --- Upload test data once before benchmarks ---
-var isAzurite = connectionString.Contains("devstoreaccount1");
-Console.WriteLine($"Uploading test data to {(isAzurite ? "Azurite" : "Azure Blob Storage")}...");
+Console.WriteLine("Uploading test data to Azure Blob Storage...");
 var storage = new BlobStorageService(connectionString);
 await storage.InitializeAsync();
 
@@ -43,4 +43,5 @@ Console.WriteLine($"Uploaded {packedCount} packed field blobs in {sw.ElapsedMill
 Console.WriteLine();
 
 // --- Run benchmarks ---
+BenchmarkRunner.Run<PackedWriteBenchmarks>();
 BenchmarkRunner.Run<PackedMultiArticleQueryBenchmarks>();
