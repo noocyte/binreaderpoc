@@ -1,4 +1,3 @@
-using BinReader.BlobFormat;
 using BinReader.Models;
 
 namespace BinReader.PackedBlobFormat;

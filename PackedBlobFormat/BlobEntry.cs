@@ -1,4 +1,4 @@
-namespace BinReader.BlobFormat;
+namespace BinReader.PackedBlobFormat;
 
 public readonly record struct BlobEntry(long TimestampTicks, double RawValue)
 {
