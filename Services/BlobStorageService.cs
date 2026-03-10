@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Specialized;
@@ -49,7 +50,8 @@ public class BlobStorageService
     public async Task UploadPackedFieldBlobAsync(string fieldName, byte[] data)
     {
         var blobClient = _container.GetBlockBlobClient(PackedBlobPath(fieldName));
-        using var stream = new MemoryStream(data);
+        var compressed = Compress(data);
+        using var stream = new MemoryStream(compressed);
         await blobClient.UploadAsync(stream, conditions: null);
     }
 
@@ -65,9 +67,26 @@ public class BlobStorageService
             return Optional<byte[]>.None;
 
         var response = await blobClient.DownloadContentAsync();
-        var data = response.Value.Content.ToArray();
+        var data = Decompress(response.Value.Content.ToArray());
 
         _cache.Set(path, data);
         return data;
+    }
+
+    private static byte[] Compress(byte[] data)
+    {
+        using var output = new MemoryStream();
+        using (var gzip = new GZipStream(output, CompressionLevel.Optimal))
+            gzip.Write(data);
+        return output.ToArray();
+    }
+
+    private static byte[] Decompress(byte[] data)
+    {
+        using var input = new MemoryStream(data);
+        using var gzip = new GZipStream(input, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        gzip.CopyTo(output);
+        return output.ToArray();
     }
 }
