@@ -50,8 +50,13 @@ public class PackedBenchmarks
     [Benchmark(Description = "Write + Upload packed blob")]
     public async Task WriteAndUploadPacked()
     {
-        var blob = PackedBlobWriter.Write(FieldType.Number, _priceArticleData.Take(QueryArticleCount).ToList());
-        await _storage.UploadPackedFieldBlobAsync("price-bench", blob);
+        var subset = _priceArticleData.Take(QueryArticleCount).ToList();
+        var shardGroups = subset.GroupBy(a => ShardKey.ForGuid(a.ArticleId));
+        foreach (var group in shardGroups)
+        {
+            var blob = PackedBlobWriter.Write(FieldType.Number, group.ToList());
+            await _storage.UploadPackedFieldBlobAsync("price-bench", group.Key, blob);
+        }
     }
 
     // --- Query benchmarks ---

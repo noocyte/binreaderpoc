@@ -5,6 +5,7 @@ using BinReader.DataGeneration;
 using BinReader.Models;
 using BinReader.PackedBlobFormat;
 using BinReader.Services;
+using static BinReader.PackedBlobFormat.ShardKey;
 
 var connectionString = Environment.GetEnvironmentVariable("AZURE_STORAGE_CONNECTION_STRING")
     ?? throw new InvalidOperationException("AZURE_STORAGE_CONNECTION_STRING environment variable is not set.");
@@ -23,10 +24,17 @@ var articleData = articles
     .ToList();
 
 var totalChanges = articleData.Sum(a => a.Item2.Count);
-var packedBlob = PackedBlobWriter.Write(FieldType.Number, articleData);
-Console.WriteLine($"Packed blob size: {packedBlob.Length:N0} bytes ({totalChanges:N0} changes across {articles.Count} articles)");
+var shardGroups = articleData.GroupBy(a => ShardKey.ForGuid(a.Id)).ToList();
 
-await storage.UploadPackedFieldBlobAsync("price", packedBlob);
+var totalBytes = 0L;
+foreach (var group in shardGroups)
+{
+    var shardBlob = PackedBlobWriter.Write(FieldType.Number, group.ToList());
+    totalBytes += shardBlob.Length;
+    await storage.UploadPackedFieldBlobAsync("price", group.Key, shardBlob);
+    Console.WriteLine($"  Shard '{group.Key}': {shardBlob.Length:N0} bytes, {group.Count()} articles");
+}
+Console.WriteLine($"Total packed size: {totalBytes:N0} bytes ({totalChanges:N0} changes across {articles.Count} articles, {shardGroups.Count} shards)");
 
 sw.Stop();
 Console.WriteLine($"Uploaded in {sw.ElapsedMilliseconds}ms");

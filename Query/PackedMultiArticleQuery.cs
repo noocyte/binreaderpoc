@@ -18,24 +18,36 @@ public class PackedMultiArticleQuery
         string fieldName,
         TimeFilter filter)
     {
-        var optionalBlob = await _storage.DownloadPackedFieldBlobAsync(fieldName);
-        if (!optionalBlob.HasValue)
-            return new Dictionary<Guid, List<FieldChange>>();
-
-        var blob = optionalBlob.Value;
-        var header = PackedBlobReader.ReadHeader(blob);
         var results = new Dictionary<Guid, List<FieldChange>>();
+        var shardGroups = GroupByShard(articleIds);
 
-        for (var i = 0; i < articleIds.Count; i++)
+        var tasks = shardGroups.Select(async group =>
         {
-            var articleIndex = PackedBlobReader.FindArticle(blob, header, articleIds[i]);
-            if (articleIndex is null)
-                continue;
+            var optionalBlob = await _storage.DownloadPackedFieldBlobAsync(fieldName, group.Key);
+            if (!optionalBlob.HasValue)
+                return new List<(Guid Id, List<FieldChange> Changes)>();
 
-            var changes = ApplyFilter(blob, header, articleIndex.Value, filter);
-            if (changes.Count > 0)
-                results[articleIds[i]] = changes;
-        }
+            var blob = optionalBlob.Value;
+            var header = PackedBlobReader.ReadHeader(blob);
+            var shardResults = new List<(Guid Id, List<FieldChange> Changes)>();
+
+            foreach (var id in group.Value)
+            {
+                var articleIndex = PackedBlobReader.FindArticle(blob, header, id);
+                if (articleIndex is null)
+                    continue;
+
+                var changes = ApplyFilter(blob, header, articleIndex.Value, filter);
+                if (changes.Count > 0)
+                    shardResults.Add((id, changes));
+            }
+
+            return shardResults;
+        }).ToList();
+
+        foreach (var shardResults in await Task.WhenAll(tasks))
+            foreach (var (id, changes) in shardResults)
+                results[id] = changes;
 
         return results;
     }
@@ -100,32 +112,60 @@ public class PackedMultiArticleQuery
         TimeFilter filter,
         Func<List<FieldChange>, double> aggregate)
     {
-        var optionalBlob = await _storage.DownloadPackedFieldBlobAsync(fieldName);
-        if (!optionalBlob.HasValue)
-            return new Dictionary<Guid, double>();
-
-        var blob = optionalBlob.Value;
-        var header = PackedBlobReader.ReadHeader(blob);
         var results = new Dictionary<Guid, double>();
+        var shardGroups = GroupByShard(articleIds);
 
-        for (var i = 0; i < articleIds.Count; i++)
+        var tasks = shardGroups.Select(async group =>
         {
-            var articleIndex = PackedBlobReader.FindArticle(blob, header, articleIds[i]);
-            if (articleIndex is null)
-                continue;
+            var optionalBlob = await _storage.DownloadPackedFieldBlobAsync(fieldName, group.Key);
+            if (!optionalBlob.HasValue)
+                return new List<(Guid Id, double Value)>();
 
-            var changes = ApplyFilter(blob, header, articleIndex.Value, filter);
-            if (changes.Count == 0)
-                continue;
+            var blob = optionalBlob.Value;
+            var header = PackedBlobReader.ReadHeader(blob);
+            var shardResults = new List<(Guid Id, double Value)>();
 
-            if (changes[0].FieldType != FieldType.Number)
-                throw new InvalidOperationException(
-                    $"Aggregate functions only support Number fields, but got {changes[0].FieldType}.");
+            foreach (var id in group.Value)
+            {
+                var articleIndex = PackedBlobReader.FindArticle(blob, header, id);
+                if (articleIndex is null)
+                    continue;
 
-            results[articleIds[i]] = aggregate(changes);
-        }
+                var changes = ApplyFilter(blob, header, articleIndex.Value, filter);
+                if (changes.Count == 0)
+                    continue;
+
+                if (changes[0].FieldType != FieldType.Number)
+                    throw new InvalidOperationException(
+                        $"Aggregate functions only support Number fields, but got {changes[0].FieldType}.");
+
+                shardResults.Add((id, aggregate(changes)));
+            }
+
+            return shardResults;
+        }).ToList();
+
+        foreach (var shardResults in await Task.WhenAll(tasks))
+            foreach (var (id, value) in shardResults)
+                results[id] = value;
 
         return results;
+    }
+
+    private static Dictionary<char, List<Guid>> GroupByShard(IReadOnlyList<Guid> articleIds)
+    {
+        var groups = new Dictionary<char, List<Guid>>();
+        for (var i = 0; i < articleIds.Count; i++)
+        {
+            var shard = ShardKey.ForGuid(articleIds[i]);
+            if (!groups.TryGetValue(shard, out var list))
+            {
+                list = new List<Guid>();
+                groups[shard] = list;
+            }
+            list.Add(articleIds[i]);
+        }
+        return groups;
     }
 
     private static List<FieldChange> ApplyFilter(

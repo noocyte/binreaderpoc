@@ -26,17 +26,23 @@ public static class PackedBlobWriter
         buffer[1] = valueSize;
         BitConverter.TryWriteBytes(buffer.AsSpan(2, 4), articles.Count);
 
+        // Sort articles by hash so the index supports binary search
+        var sorted = new (ulong Hash, Guid Id, IReadOnlyList<FieldChange> Changes)[articles.Count];
+        for (var i = 0; i < articles.Count; i++)
+            sorted[i] = (ArticleIdHasher.Hash(articles[i].ArticleId), articles[i].ArticleId, articles[i].Changes);
+        Array.Sort(sorted, (a, b) => a.Hash.CompareTo(b.Hash));
+
         // Write article index and entries
         var entryByteOffset = 0;
         var entriesSectionStart = PackedBlobHeader.Size + articles.Count * ArticleIndexEntry.Size;
 
-        for (var i = 0; i < articles.Count; i++)
+        for (var i = 0; i < sorted.Length; i++)
         {
-            var (articleId, changes) = articles[i];
+            var (hash, articleId, changes) = sorted[i];
 
             // Write index entry
             var indexOffset = PackedBlobHeader.Size + i * ArticleIndexEntry.Size;
-            BitConverter.TryWriteBytes(buffer.AsSpan(indexOffset, 8), ArticleIdHasher.Hash(articleId));
+            BitConverter.TryWriteBytes(buffer.AsSpan(indexOffset, 8), hash);
             BitConverter.TryWriteBytes(buffer.AsSpan(indexOffset + 8, 4), entryByteOffset);
             BitConverter.TryWriteBytes(buffer.AsSpan(indexOffset + 12, 4), changes.Count);
 

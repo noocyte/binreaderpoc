@@ -25,11 +25,17 @@ public static class PackedBlobReader
         ReadOnlySpan<byte> blob, PackedBlobHeader header, Guid articleId)
     {
         var targetHash = ArticleIdHasher.Hash(articleId);
-        for (var i = 0; i < header.ArticleCount; i++)
+        int lo = 0, hi = header.ArticleCount - 1;
+        while (lo <= hi)
         {
-            var entry = ReadArticleIndex(blob, i);
+            var mid = lo + (hi - lo) / 2;
+            var entry = ReadArticleIndex(blob, mid);
             if (entry.ArticleIdHash == targetHash)
                 return entry;
+            if (entry.ArticleIdHash < targetHash)
+                lo = mid + 1;
+            else
+                hi = mid - 1;
         }
         return null;
     }

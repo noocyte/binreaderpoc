@@ -1,7 +1,7 @@
-using System.IO.Compression;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Specialized;
 using DotNext;
+using ZstdSharp;
 
 namespace BinReader.Services;
 
@@ -24,20 +24,20 @@ public class BlobStorageService
             await _container.DeleteBlobAsync(blob.Name);
     }
 
-    private static string PackedBlobPath(string fieldName)
-        => $"packed/{fieldName}";
+    private static string PackedBlobPath(string fieldName, char shard)
+        => $"packed/{fieldName}/{shard}.bin";
 
-    public async Task UploadPackedFieldBlobAsync(string fieldName, byte[] data)
+    public async Task UploadPackedFieldBlobAsync(string fieldName, char shard, byte[] data)
     {
-        var blobClient = _container.GetBlockBlobClient(PackedBlobPath(fieldName));
+        var blobClient = _container.GetBlockBlobClient(PackedBlobPath(fieldName, shard));
         var compressed = Compress(data);
         using var stream = new MemoryStream(compressed);
         await blobClient.UploadAsync(stream, conditions: null);
     }
 
-    public async Task<Optional<byte[]>> DownloadPackedFieldBlobAsync(string fieldName)
+    public async Task<Optional<byte[]>> DownloadPackedFieldBlobAsync(string fieldName, char shard)
     {
-        var blobClient = _container.GetBlockBlobClient(PackedBlobPath(fieldName));
+        var blobClient = _container.GetBlockBlobClient(PackedBlobPath(fieldName, shard));
         if (!await blobClient.ExistsAsync())
             return Optional<byte[]>.None;
 
@@ -47,18 +47,13 @@ public class BlobStorageService
 
     private static byte[] Compress(byte[] data)
     {
-        using var output = new MemoryStream();
-        using (var gzip = new GZipStream(output, CompressionLevel.Optimal))
-            gzip.Write(data);
-        return output.ToArray();
+        using var compressor = new Compressor(7);
+        return compressor.Wrap(data).ToArray();
     }
 
     private static byte[] Decompress(byte[] data)
     {
-        using var input = new MemoryStream(data);
-        using var gzip = new GZipStream(input, CompressionMode.Decompress);
-        using var output = new MemoryStream();
-        gzip.CopyTo(output);
-        return output.ToArray();
+        using var decompressor = new Decompressor();
+        return decompressor.Unwrap(data).ToArray();
     }
 }
