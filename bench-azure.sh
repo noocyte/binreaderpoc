@@ -1,40 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run benchmarks on an Azure Spot VM in the same region as the storage account.
-# Usage: export AZURE_STORAGE_CONNECTION_STRING="..."; ./bench-azure.sh [region]
+# Run benchmarks on an Azure Spot VM with a colocated premium storage account.
+# Usage: ./bench-azure.sh [region]
+# Default region: norwayeast
 
 RG="binreader-bench-rg"
 VM_NAME="bench-vm"
 VM_SIZE="Standard_D2s_v5"
 VM_IMAGE="Ubuntu2404"
 SPOT_MAX_PRICE="0.03"
+STORAGE_ACCOUNT="binreaderbench$RANDOM"
 LOCAL_RESULTS="./BenchmarkDotNet.Artifacts-azure"
-
-if [[ -z "${AZURE_STORAGE_CONNECTION_STRING:-}" ]]; then
-  echo "ERROR: AZURE_STORAGE_CONNECTION_STRING is not set" >&2
-  exit 1
-fi
-
-# Region: argument > auto-detect from storage account
-if [[ -n "${1:-}" ]]; then
-  LOCATION="$1"
-else
-  # Extract account name from connection string and look up its location
-  ACCOUNT_NAME=$(echo "$AZURE_STORAGE_CONNECTION_STRING" | grep -oP 'AccountName=\K[^;]+')
-  echo "Auto-detecting region from storage account '$ACCOUNT_NAME'..."
-  LOCATION=$(az storage account show --name "$ACCOUNT_NAME" --query location -o tsv)
-  echo "Detected region: $LOCATION"
-fi
+LOCATION="${1:-norwayeast}"
 
 cleanup() {
-  echo "Cleaning up resource group $RG..."
+  echo "==> Cleaning up resource group $RG..."
   az group delete --name "$RG" --yes --no-wait 2>/dev/null || true
 }
 trap cleanup EXIT
 
 echo "==> Creating resource group $RG in $LOCATION"
 az group create --name "$RG" --location "$LOCATION" -o none
+
+echo "==> Creating premium storage account $STORAGE_ACCOUNT..."
+az storage account create \
+  --resource-group "$RG" \
+  --name "$STORAGE_ACCOUNT" \
+  --location "$LOCATION" \
+  --sku Premium_LRS \
+  --kind BlockBlobStorage \
+  --min-tls-version TLS1_2 \
+  -o none
+
+CONN_STRING=$(az storage account show-connection-string \
+  --resource-group "$RG" \
+  --name "$STORAGE_ACCOUNT" \
+  --query connectionString -o tsv)
 
 echo "==> Creating spot VM ($VM_SIZE)..."
 az vm create \
@@ -66,7 +68,7 @@ $SCP -r \
   "azureuser@$VM_IP:~/src/"
 
 echo "==> Running benchmarks on VM..."
-$SSH "cd ~/src && export PATH=\$HOME/.dotnet:\$PATH && export AZURE_STORAGE_CONNECTION_STRING='$AZURE_STORAGE_CONNECTION_STRING' && dotnet run -c Release"
+$SSH "cd ~/src && export PATH=\$HOME/.dotnet:\$PATH && export AZURE_STORAGE_CONNECTION_STRING='$CONN_STRING' && dotnet run -c Release"
 
 echo "==> Copying results back..."
 rm -rf "$LOCAL_RESULTS"
