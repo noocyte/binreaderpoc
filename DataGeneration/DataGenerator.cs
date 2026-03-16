@@ -44,6 +44,29 @@ public static class DataGenerator
         return articles;
     }
 
+    public static List<Article> GenerateSingleFieldArticles(
+        string fieldName, FieldType fieldType,
+        int articleCount = 2000, int minChanges = 100, int maxChanges = 2000, int seed = 42)
+    {
+        var rng = new Random(seed);
+        var articles = new List<Article>(articleCount);
+
+        for (var i = 0; i < articleCount; i++)
+        {
+            var changeCount = rng.Next(minChanges, maxChanges + 1);
+            articles.Add(new Article
+            {
+                Id = Guid.NewGuid(),
+                Fields = new Dictionary<string, List<FieldChange>>
+                {
+                    [fieldName] = GenerateChanges(fieldType, changeCount, rng)
+                }
+            });
+        }
+
+        return articles;
+    }
+
     private static T[] PickRandomSubset<T>(T[] pool, int count, Random rng)
     {
         var copy = pool.ToArray();

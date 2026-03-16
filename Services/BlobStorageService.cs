@@ -1,9 +1,7 @@
 using System.IO.Compression;
-using Azure;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Specialized;
 using DotNext;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace BinReader.Services;
 
@@ -11,7 +9,6 @@ public class BlobStorageService
 {
     private const string ContainerName = "temporal-fields";
     private readonly BlobContainerClient _container;
-    private readonly MemoryCache _cache = new(new MemoryCacheOptions());
 
     public BlobStorageService(string connectionString)
     {
@@ -21,27 +18,10 @@ public class BlobStorageService
 
     public async Task InitializeAsync()
     {
-        if (await _container.ExistsAsync())
-        {
-            await _container.DeleteAsync();
-            Console.Write("Waiting for container deletion to propagate");
-            while (true)
-            {
-                try
-                {
-                    await _container.CreateAsync();
-                    Console.WriteLine(" done.");
-                    return;
-                }
-                catch (RequestFailedException ex) when (ex.ErrorCode == "ContainerBeingDeleted")
-                {
-                    Console.Write(".");
-                    await Task.Delay(2000);
-                }
-            }
-        }
+        await _container.CreateIfNotExistsAsync();
 
-        await _container.CreateAsync();
+        await foreach (var blob in _container.GetBlobsAsync())
+            await _container.DeleteBlobAsync(blob.Name);
     }
 
     private static string PackedBlobPath(string fieldName)
@@ -57,20 +37,12 @@ public class BlobStorageService
 
     public async Task<Optional<byte[]>> DownloadPackedFieldBlobAsync(string fieldName)
     {
-        var path = PackedBlobPath(fieldName);
-
-        if (_cache.TryGetValue<byte[]>(path, out var cached))
-            return cached!;
-
-        var blobClient = _container.GetBlockBlobClient(path);
+        var blobClient = _container.GetBlockBlobClient(PackedBlobPath(fieldName));
         if (!await blobClient.ExistsAsync())
             return Optional<byte[]>.None;
 
         var response = await blobClient.DownloadContentAsync();
-        var data = Decompress(response.Value.Content.ToArray());
-
-        _cache.Set(path, data);
-        return data;
+        return Decompress(response.Value.Content.ToArray());
     }
 
     private static byte[] Compress(byte[] data)

@@ -15,33 +15,22 @@ var storage = new BlobStorageService(connectionString);
 await storage.InitializeAsync();
 
 var sw = Stopwatch.StartNew();
-var articles = DataGenerator.GenerateArticles(count: 1000);
+var articles = DataGenerator.GenerateSingleFieldArticles("price", FieldType.Number,
+    articleCount: 2000, minChanges: 100, maxChanges: 2000);
 
-// --- Upload packed blobs (one per field) ---
-var fieldGroups = new Dictionary<string, (FieldType Type, List<(Guid ArticleId, IReadOnlyList<FieldChange> Changes)> Articles)>();
+var articleData = articles
+    .Select(a => (a.Id, (IReadOnlyList<FieldChange>)a.Fields["price"]))
+    .ToList();
 
-foreach (var article in articles)
-{
-    foreach (var (fieldName, changes) in article.Fields)
-    {
-        if (!fieldGroups.ContainsKey(fieldName))
-            fieldGroups[fieldName] = (changes[0].FieldType, new List<(Guid, IReadOnlyList<FieldChange>)>());
-        fieldGroups[fieldName].Articles.Add((article.Id, changes));
-    }
-}
+var totalChanges = articleData.Sum(a => a.Item2.Count);
+var packedBlob = PackedBlobWriter.Write(FieldType.Number, articleData);
+Console.WriteLine($"Packed blob size: {packedBlob.Length:N0} bytes ({totalChanges:N0} changes across {articles.Count} articles)");
 
-var packedCount = 0;
-foreach (var (fieldName, (fieldType, articleData)) in fieldGroups)
-{
-    var packedBlob = PackedBlobWriter.Write(fieldType, articleData);
-    await storage.UploadPackedFieldBlobAsync(fieldName, packedBlob);
-    packedCount++;
-}
+await storage.UploadPackedFieldBlobAsync("price", packedBlob);
 
 sw.Stop();
-Console.WriteLine($"Uploaded {packedCount} packed field blobs in {sw.ElapsedMilliseconds}ms");
+Console.WriteLine($"Uploaded in {sw.ElapsedMilliseconds}ms");
 Console.WriteLine();
 
 // --- Run benchmarks ---
-BenchmarkRunner.Run<PackedWriteBenchmarks>();
-BenchmarkRunner.Run<PackedMultiArticleQueryBenchmarks>();
+BenchmarkRunner.Run<PackedBenchmarks>();
